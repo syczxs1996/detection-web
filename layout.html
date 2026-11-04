@@ -249,67 +249,96 @@ function flat(w,d,color,op,y,cx,cz){ const m=new T.Mesh(new T.PlaneGeometry(w,d)
 // 设备模型（按宣传册外形简化，尺寸为示意）
 // ================================================================
 function buildInspect(o){
-  // 验布机 LB551F：白色主框 + 蓝紫侧板 + 倾斜检测舱 + 辊筒系统 + 前操作台
-  const g=new T.Group(), L=o.fw+700, D=1500, W=L-640;
-  const blueSide=std(0x3a4ecc,.2,.5);  // 蓝紫色侧板
-  const glassM=std(0xd0e8f0,.1,.1,{transparent:true,opacity:.22,depthWrite:false,side:T.DoubleSide});
+  // 验布机：蓝色侧板（天蓝色）+ 灰绿色检测舱盖 + 底层输送区 + 中层检测台 + 右侧配电柜
+  const g=new T.Group(), L=o.fw+700, D=1600, W=L-200;
+  const skyBlue=std(0x3a8fd4,.15,.5);     // 天蓝色侧板
+  const tealHood=std(0x4a7a72,.2,.55);    // 灰绿色舱盖
+  const frameGray=std(0x5a6470,.2,.6);    // 深灰绿色框架
 
-  // 左右蓝色侧板（两片厚板，覆盖全高）
-  for(const s of [-1,1]){
-    const x=s*(L/2-160);
-    box(280,2200,D,blueSide,x,1100,0,g);         // 主侧板
-    box(290,80,D+20,M.white,x,2200,0,g);          // 顶部白边
-  }
-  // 底部机台（白色，带脚垫）
-  box(W+40,240,D+40,M.white,0,120,0,g);
+  // ── 底层机台（输送区，低矮灰色框架）──
+  box(W,80,D,frameGray,0,40,0,g);          // 底板
+  // 底层脚垫（4角）
   for(const fx of [-W/2+120,W/2-120]) for(const fz of [-D/2+120,D/2-120])
-    box(100,40,100,M.dark,fx,245,fz,g);
+    cyl(55,80,M.dark,'y',fx,40,fz,g);
+  // 底层框架侧边
+  for(const s of [-1,1]){
+    box(60,700,D,frameGray,s*(W/2-30),390,0,g);    // 左右纵梁
+    box(W,60,60,frameGray,0,700,s*(D/2-30),g);     // 前后横梁
+  }
+  // 底层辊筒（放卷区，橙色纸管芯 + 钢轴）
+  cyl(200,o.fw,M.roll,'x',0,340,-D/2+300,g);
+  cyl(46,W-100,M.steel,'x',0,340,-D/2+300,g);
+  // 底层传动辊
+  cyl(70,W-100,M.steel,'x',0,520, D/2-300,g);
+  cyl(55,W-100,M.steel,'x',0,620, 0,g);
 
-  // 中部传动区白色外壳（两侧）
-  box(W,60,D,M.white,0,460,0,g);
-  box(W,60,D,M.white,0,860,0,g);
+  // ── 中层检测台（水平灰色台面，布料铺过）──
+  box(W,30,D-200,frameGray,0,750,0,g);             // 台面板
+  // 台面上导布辊
+  cyl(55,W-60,M.steel,'x',0,790,-D/2+250,g);
+  cyl(55,W-60,M.steel,'x',0,790, D/2-250,g);
+  // 布料（斜铺过台面）
+  const fb=box(o.fw,4,D-120,M.fabric,0,760,0,g); fb.rotation.x=.04;
 
-  // 主辊筒（布卷放卷辊）
-  cyl(200,o.fw,M.roll2,'x',0,580,-D/2+360,g);
-  cyl(46,W,M.steel,'x',0,580,-D/2+360,g);
-  // 张力辊 + 导布辊
-  cyl(65,W,M.steel,'x',0,980,D/2-280,g);
-  cyl(55,W,M.steel,'x',0,680,80,g);
-  cyl(50,W,M.steel,'x',0,1150,-80,g);
+  // 中间操作杆架（两个L形支架站在台面两端）
+  for(const s of [-1,1]){
+    box(50,500,50,frameGray,s*(W/2-200),1000,-D/2+200,g);  // 竖杆
+    box(200,50,50,frameGray,s*(W/2-100),1480,-D/2+200,g);  // 横杆
+  }
+  // 操作控制盒（挂在横杆中央）
+  box(240,180,80,M.dark,0,1520,-D/2+160,g);
+  box(200,120,10,std(0x1a2a40,.1,.4),0,1540,-D/2+120,g);  // 屏幕
+  // 红绿按钮
+  cyl(22,12,std(0xcc2222,.1,.4),'z',-50,1580,-D/2+119,g);
+  cyl(22,12,std(0x229933,.1,.4),'z', 50,1580,-D/2+119,g);
 
-  // 倾斜检测板（光台）
-  const bd=box(W-40,1100,30,M.black,0,1620,-D/2+560,g); bd.rotation.x=-.28;
-  const fb=box(o.fw,4,1350,M.fabric,0,1560,60,g); fb.rotation.x=.85;
+  // ── 右侧配电柜（蓝色，带门）──
+  const cx=W/2+80, cw=500, ch=1800, cd=D;
+  box(cw,ch,cd,skyBlue,cx,ch/2,0,g);
+  box(cw+20,20,cd+20,M.alu,cx,ch,0,g);       // 顶盖
+  box(cw+20,20,cd+20,M.dark,cx,10,0,g);      // 底座
+  // 柜门分割线
+  box(8,ch-100,4,M.alu,cx,ch/2,-cd/2+2,g);
+  box(8,ch-100,4,M.alu,cx,ch/2, cd/2-2,g);
+  // 铭牌
+  box(200,130,8,M.white,cx+10,ch*0.75,cd/2+2,g);
+  box(160,90,4,M.dark,cx+10,ch*0.75,cd/2+4,g);
+  // 门把手
+  box(20,120,20,M.steel,cx-2,ch*0.5,-cd/2+8,g);
+  // 右侧电机（突出的绿色小电机）
+  cyl(80,180,std(0x1a7a3a,.2,.5),'z',cx+cw/2,ch*0.4,D/2-300,g);
+  cyl(22,200,M.steel,'z',cx+cw/2+90,ch*0.4,D/2-300,g);
 
-  // 顶部倾斜透明检测舱盖
-  const hood=box(L-120,160,1400,glassM,0,2320,-30,g); hood.rotation.x=-.16;
-  const hoodFrame=box(L-120,30,1400,M.white,0,2290,-30,g); hoodFrame.rotation.x=-.16;
+  // ── 顶部灰绿色检测舱盖（大梯形盖，向后开口）──
+  // 后背板（垂直）
+  box(L+cw,1100,30,tealHood,cx/2,1250+550,-D/2+15,g);
+  // 左斜面（从后背板顶部向前延伸）
+  const lp=box(L+cw,30,1400,tealHood,cx/2,2300,0,g); lp.rotation.x=.18; // 顶盖
+  const lf=box(L+cw,1100,30,tealHood,cx/2,1250+550,-D/2+15,g);          // 后墙（重用）
+  // 顶盖前沿横梁
+  box(L+cw+40,60,40,tealHood,cx/2,2420,-D/2+700,g);
+  // 舱盖左右侧壁（三角形简化为梯形板）
+  for(const s of [-1,1]){
+    const sx=s*(L/2+cw/2-10);
+    box(30,1100,1400,tealHood,cx/2+sx,1250+550,0,g);  // 侧壁
+  }
+  // 舱内顶部绿色绒布（检测面）
+  box(L+cw-80,20,1350,std(0x2a5a30,.1,.9),cx/2,2260,30,g);
   // 舱内灯管
-  const lamp=box(W-140,18,90,M.lamp,0,2210,360,g); lamp.rotation.x=-.16;
-
-  // 前操作台（配电箱 + 屏幕）
-  box(480,1050,380,blueSide,L/2-520,525,D/2-190,g);  // 配电箱体
-  box(500,60,400,M.white,L/2-520,1055,D/2-190,g);     // 台面
-  box(220,140,10,M.dark,L/2-520,1160,D/2-8,g);        // 操作屏
-  box(60,60,10,M.steel,L/2-600,920,D/2-8,g);          // 急停按钮座
-  cyl(30,20,std(0xcc2020,.1,.5),'z',L/2-600,940,D/2+2,g); // 红色急停
-
-  // 后侧成卷收布辊
-  cyl(220,o.fw,M.roll,'x',0,650,-D/2+200,g);
-  cyl(46,W,M.steel,'x',0,650,-D/2+200,g);
+  box(W-100,14,60,M.lamp,0,2180,200,g);
 
   if(o.ai){ // 织鉴视觉检测架：型材龙门 + 线阵相机 + 条形光源
-    for(const s of [-1,1]) box(40,1700,80,M.alu,s*(W/2-30),1950,D/2-40,g);
-    box(W,80,40,M.alu,0,2700,D/2-40,g);
+    for(const s of [-1,1]) box(40,1600,80,M.alu,s*(W/2-30),1100,D/2-40,g);
+    box(W,80,40,M.alu,0,2660,D/2-40,g);
     const n=Math.max(2,Math.ceil(o.fw/410));
     for(let i=0;i<n;i++){
       const x=-o.fw/2+o.fw*(i+.5)/n;
-      box(62,52,62,M.black,x,2620,D/2-40,g);
-      cyl(22,64,M.dark,'y',x,2566,D/2-40,g);
+      box(62,52,62,M.black,x,2580,D/2-40,g);
+      cyl(22,64,M.dark,'y',x,2526,D/2-40,g);
     }
-    box(W-80,50,70,M.dark,0,2420,D/2-165,g);
-    box(W-120,6,52,M.lamp,0,2392,D/2-165,g);
-    box(300,90,6,M.accent,0,2700,D/2-18,g);
+    box(W-80,50,70,M.dark,0,2380,D/2-160,g);
+    box(W-120,6,52,M.lamp,0,2352,D/2-160,g);
+    box(300,90,6,M.accent,0,2660,D/2-18,g);
   }
   return g;
 }
