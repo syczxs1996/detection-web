@@ -127,6 +127,10 @@ aside{background:var(--panel);border-left:1px solid var(--line);min-width:0;disp
   .hint{max-width:calc(100% - 24px);bottom:48px}
   .legend{display:none}
 }
+.flowbar{position:absolute;left:12px;bottom:78px;max-width:calc(100% - 24px);padding:10px 12px;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;box-shadow:0 3px 16px #0001;display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px;z-index:5}
+.flowbar select{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:5px}
+.flowbar progress{width:100%;height:5px;accent-color:var(--accent)}
+.flowbar small{color:var(--muted)}
 </style>
 </head>
 <body>
@@ -148,10 +152,17 @@ aside{background:var(--panel);border-left:1px solid var(--line);min-width:0;disp
       <div class="seg" role="group" aria-label="视图"><button data-view="plan">平面图</button><button data-view="3d">3D</button></div>
       <div class="seg"><button id="bUndo" title="撤销 Ctrl+Z">↶ 撤销</button><button id="bRedo" title="重做 Ctrl+Y">↷ 重做</button></div>
       <div class="seg"><button id="bFit" title="F">⤢ 全景</button><button id="bWall">墙体：剖切</button><button id="bLbl" aria-pressed="true">标注</button></div>
-      <span class="spacer"></span>
-      <div class="seg"><button id="bDemo">载入示例</button><button id="bClear">清空</button><button id="bPng">导出图片</button><button id="bSave">保存方案</button><button id="bOpen">打开方案</button></div>
+      <div class="seg"><label style="padding:4px 7px;font-size:12px">画质 <select id="quality" aria-label="渲染画质" style="font:inherit;background:var(--panel);color:var(--fg);border:0"><option value="auto">自动</option><option value="lite">流畅</option><option value="standard">标准</option><option value="high">高清</option></select></label></div><span class="spacer"></span>
+      <div class="seg"><button id="bDemo">载入图示产线</button><button id="bClear">清空</button><button id="bPng">导出图片</button><button id="bSave">保存方案</button><button id="bOpen">打开方案</button></div>
     </div>
     <div class="toolopt" id="toolopt" hidden></div>
+    <div class="flowbar" aria-label="产线动作流程">
+      <button class="mini pri" id="flowPlay" aria-pressed="false">▶ 播放流程</button><button class="mini" id="flowReset">重置</button>
+      <label>速度 <select id="flowSpeed"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option></select></label>
+      <span id="flowCount">已入框 0 卷</span><span id="flowStatus" role="status" aria-live="polite"></span>
+      <progress id="flowProgress" max="100" value="0" aria-label="流程进度"></progress>
+      <small>动作示意 · 储布机预留段仅演示转运，非实际生产节拍</small>
+    </div>
     <div class="legend"><span><i style="background:#2f80d0;opacity:.5"></i>操作区</span><span><i style="background:#2e9a5a"></i>门口留空</span><span><i style="background:#d4b106"></i>通道</span><span><i style="background:#e5484d"></i>冲突</span></div>
     <div class="hint" id="hint"></div>
     <div class="status" id="status">—</div>
@@ -180,6 +191,8 @@ aside{background:var(--panel);border-left:1px solid var(--line);min-width:0;disp
 
 <script src="assets/vendor/three.min.js"></script>
 <script src="assets/vendor/OrbitControls.js"></script>
+<script src="assets/line-flow.js"></script>
+<script src="assets/equipment-performance.js"></script>
 <script>
 (function(){
 'use strict';
@@ -249,157 +262,192 @@ function flat(w,d,color,op,y,cx,cz){ const m=new T.Mesh(new T.PlaneGeometry(w,d)
 // 设备模型（按宣传册外形简化，尺寸为示意）
 // ================================================================
 function buildInspect(o){
-  // 验布机：对照实物 —— 天蓝色右侧配电区，灰绿色大舱盖，深灰绿框架，底层两格输送区
-  const g=new T.Group();
-  const FW=o.fw;
-  const L=FW+600;    // 总长（门幅方向）
-  const D=1700;      // 进深
-  const skyBlue=std(0x5aaddc,.15,.45);  // 天蓝色
-  const teal=std(0x527870,.2,.5);       // 灰绿色舱盖
-  const fg=std(0x4a5a60,.2,.6);         // 深灰绿框架
-
-  // ── 底层两格输送区 ──
-  const BH=700;
-  for(const s of [-1,1]){
-    box(L,BH,40,fg,0,BH/2,s*(D/2-20),g);
-    box(40,BH,D,fg,s*(L/2-20),BH/2,0,g);
+  // +z 为操作面。毫米制，门幅之外预留两侧机架、传动和手轮。
+  const g=new T.Group(), FW=o.fw, W=FW+700, side=FW/2+125, span=FW+100;
+  const frame=std(0x465d60,.35,.55), hood=std(0x6b8586,.25,.55);
+  const blue=std(0x51a3db,.2,.45), rubber=std(0x20292b,.1,.8);
+  const cloth=std(0xb0b4ad,0,.95), orange=std(0xb98136,.2,.65);
+  // yz 截面沿 x 挤出，保证侧板与罩壳是封闭实体。
+  function profile(points,x,width,mat){
+    const shape=new T.Shape();
+    points.forEach(([z,y],i)=>i?shape.lineTo(z,y):shape.moveTo(z,y)); shape.closePath();
+    const geo=new T.ExtrudeGeometry(shape,{depth:width,bevelEnabled:false});
+    geo.rotateY(-Math.PI/2); geo.translate(x+width/2,0,0);
+    const m=new T.Mesh(geo,mat); m.castShadow=SHADOWS; m.receiveShadow=SHADOWS; g.add(m); return m;
   }
-  box(L,30,D,fg,0,15,0,g);
-  box(L,20,D,fg,0,BH*0.45,0,g);
-  for(const ry of [BH*0.22, BH*0.68]){
-    cyl(60,L-80,M.steel,'x',0,ry,-D/2+300,g);
-    cyl(60,L-80,M.steel,'x',0,ry, D/2-300,g);
+  function beam(x,y1,z1,y2,z2,w,d,mat){
+    const m=box(w,Math.hypot(y2-y1,z2-z1),d,mat,x,(y1+y2)/2,(z1+z2)/2,g);
+    m.rotation.x=Math.atan2(z2-z1,y2-y1); return m;
   }
-  // 底层右侧小电机
-  cyl(70,160,std(0x1a7a3a,.2,.5),'z',L/2+10,BH*0.5,D/2-280,g);
-  cyl(18,200,M.steel,'z',L/2+90,BH*0.5,D/2-280,g);
-  for(const fx of [-L/2+120,L/2-120]) for(const fz of [-D/2+120,D/2-120])
-    cyl(50,50,M.dark,'y',fx,50,fz,g);
-
-  // ── 中层检测台面 ──
-  const TY=BH+20;
-  box(L,30,D,fg,0,TY,0,g);
-  cyl(55,L-60,M.steel,'x',0,TY+55,-D/2+260,g);
-  cyl(55,L-60,M.steel,'x',0,TY+55, D/2-260,g);
-  cyl(68,L-60,std(0xd07030,.1,.5),'x',0,TY+80,40,g);
-  // 操作控制盒（中央偏右）
-  box(240,170,80,M.dark,L/6,TY+300,-D/2+80,g);
-  box(190,110,10,std(0x1a2a40,.1,.4),L/6,TY+318,-D/2+38,g);
-  cyl(20,12,std(0xcc2222,.1,.4),'z',L/6-55,TY+358,-D/2+37,g);
-  cyl(20,12,std(0x229933,.1,.4),'z',L/6+5, TY+358,-D/2+37,g);
-  cyl(20,12,std(0x2266cc,.1,.4),'z',L/6+60,TY+358,-D/2+37,g);
-  for(const s of [-1,1]){
-    box(40,360,40,fg,L/6+s*130,TY+170,-D/2+120,g);
-    box(40,40,160,fg,L/6+s*130,TY+340,-D/2+200,g);
+  // 开放式底架、支脚和下部传动。
+  for(const x of [-side,side]){
+    box(150,120,1580,frame,x,140,0,g);
+    for(const z of [-680,680]){
+      box(110,850,110,frame,x,535,z,g);
+      cyl(55,35,M.black,'y',x,18,z,g); cyl(24,70,M.steel,'y',x,65,z,g);
+    }
   }
-
-  // ── 右侧天蓝色配电区（与主机一体） ──
-  const CX=L/2+10, CW=500, CH=BH+800;
-  box(CW,CH,D,skyBlue,CX,CH/2,0,g);
-  box(CW+16,16,D+16,M.alu,CX,CH,0,g);
-  box(CW-80,CH-120,10,std(0x3a8ac8,.1,.4),CX,CH/2,D/2+2,g);
-  box(190,120,8,M.white,CX+20,CH*0.76,D/2+4,g);
-  box(150,80,4,M.dark,CX+20,CH*0.76,D/2+5,g);
-  box(18,110,18,M.steel,CX+80,CH*0.48,D/2+6,g);
-
-  // ── 顶部大倾斜舱盖（灰绿色，后高前低） ──
-  const HBase=TY+20, HBack=1600;
-  box(L,HBack,30,teal,0,HBase+HBack/2,-D/2+15,g);
-  const roof=box(L,30,1400,teal,0,HBase+HBack-100,0,g);
-  roof.rotation.x=0.48;
-  box(L+20,70,50,teal,0,HBase+HBack-650,D/2-70,g);
-  for(const s of [-1,1]){
-    const sx=s*(L/2-15);
-    box(30,HBack,30,teal,sx,HBase+HBack/2,-D/2+15,g);
-    const sw=box(30,50,1400,teal,sx,HBase+HBack-100,0,g);
-    sw.rotation.x=0.48;
-    box(30,HBack*0.6,D*0.55,teal,sx,HBase+HBack*0.3,D/2-D*0.275,g);
+  for(const z of [-680,680]) for(const y of [170,440,910]) box(span,95,90,frame,0,y,z,g);
+  box(span,35,1310,frame,0,310,0,g);
+  for(const z of [-450,340]) cyl(70,span,M.steel,'x',0,540,z,g);
+  cyl(110,270,frame,'x',-FW/2+150,545,340,g);
+  for(let i=0;i<7;i++) cyl(115,8,M.dark,'x',-FW/2+30+i*29,545,340,g);
+  box(360,55,180,M.dark,-FW/2+150,400,340,g);
+  // 后高前低的一体侧柜；蓝色上侧板和下检修门。
+  const cheek=[[-760,280],[730,280],[730,990],[380,1050],[-260,2210],[-760,2280]];
+  for(const x of [-side,side]){
+    profile(cheek,x,210,frame);
+    profile([[-735,1040],[330,1040],[-295,2155],[-735,2210]],x,222,blue);
+    profile([[-725,340],[660,340],[660,930],[-725,930]],x,224,blue);
+    box(210,540,35,blue,x,660,750,g); box(210,170,35,blue,x,220,750,g);
+    box(20,100,18,M.steel,x-65,675,773,g);
+    box(18,95,28,M.steel,x+114,700,-580,g);
+    beam(x,1000,365,2210,-280,75,90,hood);
   }
-  box(L-60,16,1320,std(0x2a5a30,.1,.9),0,HBase+HBack-130,20,g);
-  box(L-120,10,60,M.lamp,0,HBase+HBack-200,-D/2+560,g);
-
+  box(span,1620,65,frame,0,1370,-725,g);
+  // 倾斜验布台：整面灰色布面，两端留出深色过布区。
+  const bed=new T.Group(); bed.position.set(0,1510,48); bed.rotation.x=Math.atan2(-640,1160); g.add(bed);
+  box(span,1330,65,frame,0,0,0,bed); box(FW,1260,12,rubber,0,0,39,bed);
+  box(FW-35,860,8,cloth,0,20,49,bed);
+  for(const x of [-FW/2-28,FW/2+28]) box(45,1350,75,hood,x,0,0,bed);
+  // 向操作面伸出的厚灯罩和两侧三角罩板。
+  profile([[-780,2260],[-780,2340],[290,2340],[390,2150],[290,2115],[-300,2220]],0,W-120,hood);
+  box(FW+160,155,105,hood,0,2220,330,g);
+  box(FW,55,70,rubber,0,2135,275,g); box(FW-100,18,48,M.lamp,0,2103,274,g);
+  for(const x of [-side,side]) profile([[-690,2250],[325,2160],[-125,1750]],x,90,hood);
+  box(FW,12,340,std(0x365746,.05,.9),0,2350,-540,g);
+  cyl(25,span,M.steel,'x',0,2355,-710,g);
+  for(const x of [-side,side]) box(75,50,75,frame,x,2355,-710,g);
+  // 前部收卷机构，独立辊筒与定位挡板。
+  for(const [y,z,r,mat] of [[1000,425,48,M.steel],[925,580,64,orange],[835,705,46,M.steel],[720,460,55,M.steel]]){
+    cyl(r,span,mat,'x',0,y,z,g);
+    for(const x of [-side,side]) box(75,110,95,frame,x,y,z,g);
+  }
+  box(span,100,65,hood,0,800,740,g);
+  for(const x of [-FW/2+90,FW/2-90]){
+    box(34,245,55,M.steel,x,1070,600,g); box(100,35,160,frame,x,970,550,g);
+    cyl(28,22,M.black,'y',x,1000,550,g);
+  }
+  cyl(22,140,M.steel,'x',side+140,1090,-500,g);
+  const wheel=new T.Mesh(new T.TorusGeometry(70,10,8,24),M.steel);
+  wheel.rotation.y=Math.PI/2; wheel.position.set(side+205,1090,-500); g.add(wheel);
+  box(15,125,15,M.steel,side+205,1090,-500,g);
+  cyl(12,25,M.black,'x',side+210,1140,-500,g);
+  // 由右侧悬臂承托的操作盒。
+  cyl(22,440,frame,'y',FW/2-140,1250,490,g);
+  cyl(22,FW*.38,frame,'x',FW*.31-140,1470,490,g);
+  const panel=new T.Group(); panel.position.set(FW*.12-140,1370,540); panel.rotation.x=-.23; g.add(panel);
+  box(300,195,100,hood,0,0,0,panel); box(280,175,8,M.alu,0,0,54,panel);
+  box(110,68,10,M.black,-65,32,61,panel);
+  box(90,48,5,std(0x29454b,.1,.4),-65,32,68,panel);
+  for(let i=0;i<3;i++) cyl(13,12,M.black,'z',25+i*31,34,66,panel);
+  for(let i=0;i<5;i++) cyl(12,12,i===0?M.green:i===1?orange:i===2?std(0xc43d32,.1,.5):M.black,'z',-100+i*47,-48,66,panel);
   if(o.ai){
-    for(const s of [-1,1]) box(40,1400,80,M.alu,s*(L/2-30),TY+100,D/2-40,g);
-    box(L,80,40,M.alu,0,TY+1460,D/2-40,g);
-    const n=Math.max(2,Math.ceil(FW/410));
+    // 光学组件整合在罩壳下方，不改变机体外轮廓。
+    box(FW,65,80,M.alu,0,1960,150,g);
+    const n=Math.max(2,Math.ceil(FW/500));
     for(let i=0;i<n;i++){
       const x=-FW/2+FW*(i+.5)/n;
-      box(62,52,62,M.black,x,TY+1380,D/2-40,g);
-      cyl(22,64,M.dark,'y',x,TY+1326,D/2-40,g);
+      box(65,65,75,M.dark,x,1900,150,g);
+      const lens=cyl(22,35,M.black,'z',x,1865,118,g); lens.rotation.x=-.55;
     }
-    box(L-80,50,70,M.dark,0,TY+1180,D/2-165,g);
-    box(L-120,6,52,M.lamp,0,TY+1152,D/2-165,g);
-    box(300,90,6,M.accent,0,TY+1460,D/2-18,g);
+    box(FW-80,22,35,M.lamp,0,1815,150,g);
   }
   return g;
 }
 function buildPack(){
-  // 布匹自动包装机 LB04-180
-  // 整体尺寸 4000×2700×2900，由三部分组成：
-  //   左侧：配电柜（深蓝色独立方柜）
-  //   中央：主机体（白色框架 + 绿色传送台 + 送膜立杆）
-  //   两侧：废料箱（半透明网格柜）
-  const g=new T.Group();
-  const darkBlue=std(0x233570,.15,.5);
-  const cageM=std(0x8a9bb0,.5,.4,{transparent:true,opacity:.38,depthWrite:false});
-
-  // ── 配电柜（左侧，独立）──
-  const CW=900, CH=1800, CD=700;
-  const cx=-1550;
-  box(CW,CH,CD,darkBlue,cx,CH/2,0,g);            // 柜体
-  box(CW+20,30,CD+20,M.alu,cx,CH,0,g);           // 顶盖
-  box(CW+20,30,CD+20,M.dark,cx,20,0,g);          // 底座
-  box(80,CH-100,CD+4,std(0x1a2a5e,.1,.4),cx,CH/2,0,g); // 前门深色面板
-  // 面板上的控制元件
-  box(160,80,8,M.dark,cx-200,CH*0.72,CD/2+2,g);  // 显示屏
-  box(60,60,8,std(0xcc2222,.1,.4),cx+120,CH*0.68,CD/2+2,g); // 急停
-  for(let i=0;i<3;i++) box(40,40,8,std(0x229944,.1,.5),cx-80+i*60,CH*0.6,CD/2+2,g); // 指示灯
-  box(180,30,8,M.steel,cx,CH*0.48,CD/2+2,g);     // 操作按钮条
-
-  // ── 主机体（中央）──
-  const MW=2200, MH=2600, MD=1400, mx=400;
-  // 底部机台
-  box(MW,300,MD,M.gray,mx,150,0,g);
-  box(MW+40,30,MD+40,M.dark,mx,10,0,g);          // 底座压条
-  // 左右立柱（白色）
-  for(const s of [-1,1]){
-    box(80,MH,80,M.white,mx+s*(MW/2-40),MH/2,MD/2-40,g);
-    box(80,MH,80,M.white,mx+s*(MW/2-40),MH/2,-MD/2+40,g);
+  // 包装主机与左右吸边机作为一个可移动设备，+z 为前工作台。
+  const g=new T.Group(), frame=std(0x526b6d,.3,.55), blue=std(0x479bd0,.2,.5);
+  const belt=std(0x347541,.1,.8), motor=std(0x293ea0,.3,.5);
+  // 中央机座与后部门架，保留中间过布开口。
+  box(2860,540,1080,frame,0,390,-530,g);
+  box(2380,230,12,M.dark,0,440,16,g);
+  for(const x of [-1360,1360]){
+    for(const z of [-1000,0]){
+      box(100,2120,100,frame,x,1130,z,g);
+      cyl(55,40,M.black,'y',x,20,z,g);
+    }
+    box(160,100,1100,frame,x,740,-530,g);
   }
-  // 前后横梁
-  box(MW,60,60,M.white,mx,MH-30,MD/2-40,g);
-  box(MW,60,60,M.white,mx,MH-30,-MD/2+40,g);
-  box(MW,60,60,M.white,mx,1200,MD/2-40,g);
-  // 绿色传送平台
-  box(MW-120,50,MD-100,M.green,mx,920,0,g);
-  for(const s of [-1,1]) box(MW-100,80,30,M.steel,mx,960,s*(MD/2-70),g); // 传送带侧边导轨
-  // 压膜横梁 + 热封刀
-  box(MW-60,80,60,M.alu,mx,1600,0,g);
-  box(MW-80,20,50,std(0xcc4400,.1,.5),mx,1640,0,g); // 热封条（橙红色）
-  // 包装膜辊（顶部）
-  cyl(120,MD-100,M.roll,'z',mx,MH-180,0,g);
-  cyl(36,MD-100,M.steel,'z',mx,MH-180,0,g);
-  // 送膜立杆（3根，带顶部导杆）
-  for(const x of [mx-800,mx,mx+800]){
-    cyl(35,800,M.steel,'y',x,MH+400,0,g);
-    cyl(55,50,M.dark,'y',x,MH+800,0,g);
+  // 宽而厚的灰绿色上部横箱。
+  box(2960,440,520,frame,0,2050,-810,g);
+  box(3000,40,560,frame,0,2290,-810,g);
+  box(620,280,14,M.alu,0,2050,-542,g);
+  box(570,125,8,blue,0,1990,-531,g);
+  cyl(80,110,M.steel,'x',-1530,2110,-810,g);
+  // 封切梁、导杆与打孔护板（孔洞使用实际 Shape holes）。
+  for(const y of [1330,1600]) cyl(28,2660,M.steel,'x',0,y,-450,g);
+  box(2650,125,150,M.dark,0,1510,-430,g);
+  box(2600,65,110,frame,0,1140,-245,g);
+  box(2550,14,45,std(0xb1844f,.4,.5),0,1100,-180,g);
+  const guard=new T.Shape(); guard.moveTo(-1280,-48); guard.lineTo(1280,-48); guard.lineTo(1280,48); guard.lineTo(-1280,48); guard.closePath();
+  for(let x=-1210;x<=1210;x+=95){const hole=new T.Path();hole.absarc(x,0,26,0,Math.PI*2,true);guard.holes.push(hole);}
+  const plate=new T.Mesh(new T.ExtrudeGeometry(guard,{depth:14,bevelEnabled:false}),M.steel);
+  plate.position.set(0,1240,-160);plate.castShadow=SHADOWS;g.add(plate);
+  for(let x=-1150;x<=1150;x+=460) cyl(12,330,M.steel,'y',x,1330,-300,g);
+  // 前侧两根升降塔，顶部四支独立气缸。
+  for(const x of [-1230,1230]){
+    for(const dx of [-105,105]) box(60,1050,240,frame,x+dx,1255,-30,g);
+    box(270,70,280,frame,x,1800,-30,g);
+    box(210,60,210,M.steel,x,1030,-30,g);
+    cyl(22,690,M.steel,'y',x,1390,-30,g);
   }
-  box(MW-100,40,40,M.steel,mx,MH+780,0,g); // 顶部横导杆
-
-  // ── 废料箱（两侧，各一个）──
-  const BW=700, BH=900, BD=700;
-  for(const s of [-1,1]){
-    const bx=mx+s*(MW/2+BW/2+80);
-    box(BW,BH,BD,cageM,bx,BH/2,0,g);            // 半透明网格箱体
-    box(BW+20,30,BD+20,M.steel,bx,BH,0,g);       // 顶框
-    box(BW+20,30,BD+20,M.steel,bx,10,0,g);       // 底框
-    for(const fz of [-1,1]) box(BW,BH,8,cageM,bx,BH/2,fz*(BD/2),g); // 前后网面
-    for(const fx of [-1,1]) box(8,BH,BD,cageM,bx+fx*(BW/2),BH/2,0,g); // 左右网面
-    // 万向轮
-    for(const wx of [-1,1]) for(const wz of [-1,1])
-      cyl(50,60,M.dark,'y',bx+wx*(BW/2-80),60,wz*(BD/2-80),g);
+  for(const [x,z,y,h] of [[-1230,-30,1835,560],[1230,-30,1835,560],[-740,-810,2310,560],[740,-810,2310,560]]){
+    cyl(36,h,M.alu,'y',x,y+h/2,z,g);
+    for(const dx of [-27,27]) cyl(6,h,M.steel,'y',x+dx,y+h/2,z+27,g,8);
+    for(const yy of [y,y+h]) box(90,25,90,M.dark,x,yy,z,g);
   }
-
+  // 三条窄绿色输送带，辊轴贯穿；前部不锈钢接布桌。
+  for(const z of [-800,180]) cyl(36,2600,M.steel,'x',0,855,z,g);
+  for(const x of [-600,0,600]){
+    box(155,45,980,belt,x,865,-310,g);
+    for(const z of [-800,180]) cyl(43,155,belt,'x',x,855,z,g);
+    box(70,65,880,frame,x,800,-310,g);
+  }
+  for(const x of [-850,850]){
+    for(const z of [220,1250]) box(70,780,70,frame,x,390,z,g);
+    box(70,60,1100,frame,x,150,735,g);
+    box(70,65,1100,frame,x,770,735,g);
+  }
+  for(const z of [220,1250]) box(1770,65,70,frame,0,150,z,g);
+  box(1800,35,1120,M.steel,0,825,730,g);
+  box(1800,110,35,frame,0,895,1270,g);
+  // 左右吸边机：封闭集料柜 + 蜗壳风机 + 蓝色电机 + 波纹吸管。
+  for(const sign of [-1,1]){
+    const x=sign*1770;
+    box(620,650,720,frame,x,385,-180,g);
+    box(560,575,18,blue,x,390,189,g);
+    box(650,35,750,frame,x,725,-180,g);
+    box(18,95,20,M.steel,x+sign*210,430,204,g);
+    for(const dx of [-245,245]) for(const z of [-470,110]) cyl(40,40,M.black,'y',x+dx,20,z,g);
+    box(150,150,270,frame,x,815,-200,g);
+    cyl(235,170,frame,'x',x,1040,-200,g,32);
+    cyl(95,210,motor,'x',x+sign*190,1040,-200,g);
+    for(let i=0;i<9;i++) cyl(100,8,motor,'x',x+sign*(105+i*20),1040,-200,g);
+    cyl(120,400,std(0xa3a09a,.25,.65),'x',sign*1480,1060,-200,g);
+    for(let i=0;i<16;i++) cyl(126,9,M.alu,'x',sign*(1300+i*24),1060,-200,g);
+    // 小型竖向减速电机。
+    box(110,120,110,M.alu,sign*1100,950,80,g);
+    cyl(65,180,M.gray,'y',sign*1100,1100,80,g);
+    for(let i=0;i<6;i++) cyl(70,7,M.steel,'y',sign*1100,1030+i*27,80,g);
+  }
+  return g;
+}
+function buildPackControl(){
+  // 独立配电操作柜，倾斜蓝色操作台和双开检修门。
+  const g=new T.Group(),frame=std(0x526b6d,.3,.55),blue=std(0x479bd0,.2,.5);
+  box(980,990,650,frame,0,555,0,g);
+  for(const x of [-245,245]) box(465,835,18,blue,x,535,334,g);
+  for(const x of [-35,35]) box(16,95,20,M.steel,x,545,353,g);
+  for(const x of [-440,440]) for(const z of [-270,270]) box(65,110,65,frame,x,55,z,g);
+  const top=new T.Group(); top.position.set(0,1090,0); top.rotation.x=.15; g.add(top);
+  box(1100,100,780,frame,0,0,0,top);box(1100,18,780,blue,0,59,0,top);
+  box(240,12,150,M.black,300,75,-100,top); box(205,6,115,std(0x28434c,.2,.4),300,84,-100,top);
+  for(const x of [-390,-220,-50]){box(105,12,70,M.dark,x,75,-140,top);box(80,5,48,M.white,x,84,-140,top);}
+  const red=std(0xc63d31,.1,.5),yellow=std(0xe3b72f,.1,.5);
+  cyl(32,12,yellow,'y',-380,78,130,top);cyl(23,26,red,'y',-380,95,130,top);
+  for(const [i,mat] of [red,M.green,yellow,red].entries()) cyl(13,14,mat,'y',-230+i*110,81,130,top);
+  for(let i=0;i<6;i++) box(180,10,5,M.dark,0,260+i*30,-329,g);
   return g;
 }
 function buildShrink(){
@@ -413,16 +461,60 @@ function buildShrink(){
   return g;
 }
 function buildConv(o){
+  if(o.push) return buildPusher(o);
   const g=new T.Group(), L=o.len, H=o.h;
   for(const s of [-1,1]) box(L,110,40,M.steel,0,H-55,s*330,g);
-  box(L-60,24,600,M.belt,0,H-28,0,g);
-  for(const s of [-1,1]) cyl(55,640,M.steel,'z',s*(L/2-40),H-55,0,g);
+  if(o.roller){ for(let x=-L/2+65;x<=L/2-60;x+=130) cyl(34,610,M.steel,'z',x,H-34,0,g); }
+  else box(L-60,24,600,M.belt,0,H-28,0,g);
+  for(const s of [-1,1]) cyl(55,640,M.steel,'z',s*(L/2-60),H-55,0,g);
   const n=Math.max(2,Math.ceil(L/1500)+1);
   for(let i=0;i<n;i++){ const x=-L/2+80+(L-160)*i/(n-1);
     for(const s of [-1,1]) box(50,H-110,50,M.gray,x,(H-110)/2,s*300,g);
     box(50,50,600,M.gray,x,260,0,g); }
-  if(o.push){ box(60,260,600,M.blue,-L/2+320,H+120,0,g); for(const s of [-1,1]) box(L-200,30,30,M.steel,0,H+230,s*280,g); }
   return g;
+}
+function buildPusher(o){
+  // 辊筒沿 z，布卷沿 x 输送；白色横推轮轴沿 x，将布卷送向 +z 布框。
+  const g=new T.Group(), L=o.len||3000,H=o.h||1100,D=1000;
+  const white=std(0xe5e7e2,.25,.55),wheel=std(0xe5e3d4,.05,.75),bearing=std(0x355d51,.35,.5);
+  for(const z of [-440,440]){
+    box(L,150,60,white,0,H-95,z,g);
+    box(L,65,65,white,0,250,z,g);
+    for(const x of [-L/2+100,0,L/2-100]){
+      box(85,H-120,85,white,x,(H-120)/2+45,z,g);
+      cyl(52,35,M.dark,'y',x,18,z,g);
+      box(180,18,90,white,x,45,z,g);
+    }
+  }
+  const n=Math.max(6,Math.round(L/220));
+  for(let i=0;i<n;i++){
+    const x=-L/2+110+i*(L-220)/(n-1);
+    cyl(45,840,M.steel,'z',x,H-45,0,g);
+    for(const z of [-475,475]){
+      cyl(27,20,M.dark,'z',x,H-45,z,g,12);
+      cyl(12,24,M.steel,'z',x,H-45,z,g,10);
+    }
+  }
+  // 外侧链传动，两道链条及链节，留在侧梁内侧。
+  for(const y of [H-25,H-75]){
+    box(L-160,10,14,M.dark,0,y,485,g);
+    for(let x=-L/2+90;x<L/2-80;x+=65) box(22,14,18,M.dark,x,y,485,g);
+  }
+  for(const x of [-L*.31,0,L*.31]){
+    box(180,75,780,white,x,H-270,0,g);
+    for(const z of [-240,0,240]){
+      cyl(70,105,wheel,'x',x,H-70,z,g);
+      cyl(18,190,M.steel,'x',x,H-70,z,g);
+      for(const dx of [-85,85]) box(50,90,90,bearing,x+dx,H-105,z,g);
+    }
+    cyl(58,150,M.dark,'z',x,H-235,-240,g);
+    box(120,90,95,bearing,x,H-235,-110,g);
+  }
+  return g;
+}
+function buildReserved(o){
+  // 仅标出预留位置，不虚构横移储布机外形。
+  const g=new T.Group(); g.add(rectLine(o.len||700,2200,0x87949c,5,true)); return g;
 }
 function buildShuttle(o){
   const g=new T.Group(), L=o.len;
@@ -461,26 +553,31 @@ function buildCart(){
 
 // 设备目录：size(o) 返回 [长, 深, 高]；op 为操作面（+z）需要留出的深度
 const CAT={
-  inspect:{name:'验布机',size:o=>[o.fw+700,1500,o.ai?2720:2380],op:1000,build:buildInspect,
+  inspect:{name:'验布机',size:o=>[o.fw+700,1700,2380],op:1000,build:buildInspect,
     opts:[{k:'fw',label:'门幅',type:'sel',vals:[1600,1800,2200,2600],unit:'mm'},{k:'ai',label:'加装织鉴视觉检测架',type:'bool'}]},
-  pack:{name:'布匹自动包装机',size:()=>[5400,2900,1600],op:900,build:buildPack,opts:[]},
+  pack:{name:'包装机与双侧吸边机',size:()=>[4400,2700,2900],op:900,build:buildPack,opts:[]},
+  packControl:{name:'包装机配电控制柜',size:()=>[1120,820,1250],op:800,build:buildPackControl,opts:[]},
   shrink:{name:'热收缩包装机',size:()=>[2400,1000,1600],op:0,build:buildShrink,opts:[]},
-  conv:{name:'输送带',size:o=>[o.len,700,o.h+(o.push?260:0)],op:0,build:buildConv,
+  conv:{name:'输送带',size:o=>[o.len,o.push?1000:700,o.h],op:0,build:buildConv,
     opts:[{k:'len',label:'长度',type:'num',min:1000,max:12000,step:100,unit:'mm'},{k:'h',label:'台面高',type:'sel',vals:[800,1200],unit:'mm'},{k:'push',label:'带推布装置',type:'bool'}]},
+  pusher:{name:'辊筒推布机',size:o=>[o.len,1000,o.h],op:0,build:buildPusher,opts:[{k:'len',label:'长度',type:'num',min:1500,max:6000,step:100,unit:'mm'},{k:'h',label:'台面高',type:'sel',vals:[800,1100,1200],unit:'mm'}]},
+  reserved:{name:'横移储布机预留',size:o=>[o.len,2200,0],op:0,build:buildReserved,opts:[]},
   shuttle:{name:'横移储布机',size:o=>[o.len,1400,1100],op:0,build:buildShuttle,
     opts:[{k:'len',label:'轨道长',type:'num',min:2000,max:12000,step:100,unit:'mm'}]},
   store:{name:'储布机',size:()=>[3000,1300,1800],op:800,build:buildStore,opts:[]},
   stand:{name:'上布架',size:()=>[2200,800,1300],op:0,build:buildStand,opts:[]},
-  cart:{name:'布框',size:()=>[1200,900,1030],op:0,build:buildCart,opts:[]},
+  cart:{name:'布框',size:()=>[1240,980,1030],op:0,build:buildCart,opts:[]},
 };
 const LIB=[
   {t:'inspect',name:'验布机',o:{fw:1800,ai:false}},
   {t:'inspect',name:'AI 验布机',o:{fw:1800,ai:true},bd:'含视觉检测'},
-  {t:'pack',name:'布匹自动包装机',sub:'LB04-180',o:{}},
+  {t:'pack',name:'包装机与双侧吸边机',sub:'LB04-180 · 含左右吸边机',o:{}},
+  {t:'packControl',name:'包装机配电控制柜',sub:'独立摆放',o:{}},
   {t:'shrink',name:'热收缩包装机',o:{}},
   {t:'conv',name:'3 米入布输送带',o:{len:3000,h:800,push:false}},
   {t:'conv',name:'3.8 米加高输送带',o:{len:3800,h:1200,push:false}},
-  {t:'conv',name:'3 米推布输送带',o:{len:3000,h:800,push:true}},
+  {t:'pusher',name:'辊筒推布机',sub:'白色机架 · 横向推送轮',o:{len:3000,h:1100}},
+  {t:'reserved',name:'横移储布机预留',sub:'仅占位，不显示机体',o:{len:700}},
   {t:'shuttle',name:'横移储布机',o:{len:3200}},
   {t:'store',name:'储布机',o:{}},
   {t:'stand',name:'上布架',o:{}},
@@ -495,31 +592,28 @@ const DOORS={gate:{name:'卷帘门',w:4000,h:4200,clr:2500},door:{name:'人行�
 const OBS_PRESET=[{name:'配电柜',w:800,d:600,h:2000,el:0},{name:'楼梯',w:1200,d:3500,h:3500,el:0},{name:'货架',w:2400,d:1000,h:2500,el:0},{name:'风管',w:6000,d:600,h:600,el:3200},{name:'其他',w:1000,d:1000,h:1500,el:0}];
 function emptyState(){ return {room:{pts:[],closed:false,h:6000,t:240},doors:[],cols:[],obs:[],aisles:[],mach:[]}; }
 function demoState(){
+  // 按参考照片下方完整产线排布：两组验布单元 → 热缩 → 横向包装 → 四组推布落框。
   const S=emptyState();
-  S.room={pts:[[0,0],[36000,0],[36000,22000],[0,22000]],closed:true,h:6000,t:240};
-  S.doors=[{id:uid(),seg:2,off:32000,kind:'gate',w:4000,h:4200},{id:uid(),seg:3,off:17000,kind:'door',w:1000,h:2100}];
-  [9000,18000,27000].forEach(x=>S.cols.push({id:uid(),x,z:11000,s:600}));
-  S.obs=[{id:uid(),name:'配电柜',x:35300,z:1200,w:800,d:600,h:2000,el:0,rot:0},{id:uid(),name:'风管',x:20000,z:15000,w:24000,d:600,h:600,el:3200,rot:0}];
-  S.aisles=[{id:uid(),x:4000,z:16000,w:4000,d:12000,rot:0}];
-  const M=(t,name,x,z,rot,o)=>S.mach.push({id:uid(),t,name,x,z,rot,o:Object.assign({},(LIB.find(l=>l.t===t&&l.name===name)||LIB.find(l=>l.t===t)).o,o||{})});
-  // 两组「入布输送带 → 横移储布机 → 两台验布机」
-  for(const zc of [5000,16500]){
-    M('conv','3 米入布输送带',8000,zc,90);
-    M('shuttle','横移储布机',10200,zc,0);
-    M('inspect','AI 验布机',11000,zc-1900,180);
-    M('inspect','AI 验布机',11000,zc+1900,0);
+  S.room={pts:[[0,0],[36000,0],[36000,16000],[0,16000]],closed:true,h:6000,t:240};
+  S.doors=[{id:uid(),seg:2,off:30000,kind:'gate',w:4000,h:4200}];
+  S.aisles=[{id:uid(),x:18000,z:14000,w:33000,d:2000,rot:0}];
+  const add=(t,name,x,z,rot=0,o={})=>S.mach.push({id:uid(),t,name,x,z,rot,o:Object.assign({},LIB.find(l=>l.t===t).o,o)});
+  for(const [i,x] of [1500,4800,7700,11000].entries()) add('inspect','AI 验布机 '+(i+1),x,6500,0,{fw:1800,ai:true});
+  for(const [i,x] of [3150,9350].entries()) add('reserved','横移储布机预留 '+(i+1),x,7450);
+  for(const x of [3100,6200,9300,12400]) add('conv','3 米入布输送带',x,9000,0,{len:3000,h:800,push:false});
+  add('shrink','热收缩包装机',15300,9000,0);
+  // 包装机长边沿流水线横向摆放，接布桌朝操作侧；热缩机位于上游。
+  add('pack','包装机与双侧吸边机',18900,9000,0);
+  add('packControl','包装机配电控制柜',18900,12000,0);
+  add('conv','包装后辊筒输送段',21700,9000,0,{len:1000,h:1100,push:false,roller:true});
+  for(const [i,x] of [23800,26900,30000,33100].entries()){
+    add('pusher','推布机 '+(i+1),x,9000);
+    add('cart','布框 '+(i+1),x,10100);
   }
-  M('conv','3.8 米加高输送带',14700,9000,0);
-  M('conv','3.8 米加高输送带',18500,9000,0);
-  M('pack','布匹自动包装机',22400,9000,0);
-  M('shrink','热收缩包装机',25600,8600,0);
-  M('conv','3 米推布输送带',28300,8600,0);
-  M('cart','布框',30600,7400,0); M('cart','布框',30600,8600,0); M('cart','布框',30600,9800,0);
-  M('stand','上布架',4200,3000,0);
   return S;
 }
 let S=null;
-const STORE_KEY='zj-layout-v1';
+const STORE_KEY='zj-layout-reference-line-v3';
 try{ const raw=localStorage.getItem(STORE_KEY); if(raw){ const s=JSON.parse(raw); if(s&&s.room&&Array.isArray(s.mach)) S=s; } }catch(e){}
 const QS=new URLSearchParams(location.search);
 if(!S||QS.has('demo')) S=demoState();
@@ -532,10 +626,12 @@ if(QS.get('demo')==='conflict'){ // 截图/演示用：故意制造几处冲突
 // 场景
 // ================================================================
 const stage=$('stage');
-const renderer=new T.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+let renderRequest=null, renderReady=false, dirty=true;
+function invalidate(shadows=false){ dirty=true; if(shadows) renderer.shadowMap.needsUpdate=true; if(renderReady&&!document.hidden&&renderRequest===null) renderRequest=requestAnimationFrame(loop); }
+const renderer=new T.WebGLRenderer({antialias:true,preserveDrawingBuffer:false,powerPreference:'default'});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
 renderer.outputEncoding=T.sRGBEncoding;
-renderer.shadowMap.enabled=true; renderer.shadowMap.type=T.VSMShadowMap;
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=T.PCFSoftShadowMap; renderer.shadowMap.autoUpdate=false;
 renderer.toneMapping=T.ACESFilmicToneMapping; renderer.toneMappingExposure=1.15;
 stage.prepend(renderer.domElement);
 renderer.domElement.tabIndex=0;
@@ -543,14 +639,14 @@ const canvas=renderer.domElement;
 const scene=new T.Scene();
 // 建筑模型式打光：强环境光 + 一盏柔和主光，阴影浅而软；墙根和设备脚下另加接地暗影
 scene.add(new T.HemisphereLight(0xffffff,0x9aa2ab,0.72));
-const sun=new T.DirectionalLight(0xffffff,0.85); sun.castShadow=true; sun.shadow.mapSize.set(4096,4096); sun.shadow.radius=10; sun.shadow.bias=-0.0003; scene.add(sun); scene.add(sun.target);
+const sun=new T.DirectionalLight(0xffffff,0.85); sun.castShadow=true; sun.shadow.mapSize.set(2048,2048); sun.shadow.radius=10; sun.shadow.bias=-0.0003; scene.add(sun); scene.add(sun.target);
 const fill=new T.DirectionalLight(0xdfe8ff,0.3); fill.position.set(-20000,15000,-20000); scene.add(fill);
 const ground=new T.Mesh(new T.PlaneGeometry(400000,400000),M.ground); ground.rotation.x=-Math.PI/2; ground.position.y=-30; ground.receiveShadow=true; scene.add(ground);
 ground.material=std(0xe9ebee,0,1);
 const grid1=new T.GridHelper(200000,200,0xb9c0c7,0xc9cfd5); grid1.position.y=1; grid1.material.transparent=true; grid1.material.opacity=.35; scene.add(grid1);
 const grid5=new T.GridHelper(200000,40,0x9aa3ad,0x9aa3ad); grid5.position.y=1.5; grid5.material.transparent=true; grid5.material.opacity=.45; scene.add(grid5);
 const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-function applyTheme(){ renderer.setClearColor(new T.Color(css('--stage')||'#e6ebef')); }
+function applyTheme(){ renderer.setClearColor(new T.Color(css('--stage')||'#e6ebef')); invalidate(); }
 
 // 两套相机：平面图（正交俯视）/ 3D（透视）。本页自己的 pointerdown 必须先于 OrbitControls 注册，才能在拖动设备时屏蔽视角操作
 const persp=new T.PerspectiveCamera(32,1,50,400000);
@@ -671,7 +767,7 @@ function buildEntity(kind,e){
   const g=new T.Group(); let L,D;
   if(kind==='m'){
     const C=CAT[e.t]; [L,D]=C.size(e.o);
-    g.add(C.build(e.o));
+    g.add(optimizeEquipment(T,C.build(e.o)));
     g.add(rectLine(L,D,0x56616c,9)); g.add(blob(L,D,450));
     if(C.op){ const z=new T.Group(); z.add(rectLine(L,C.op,0x2f80d0,6,true,0,D/2+C.op/2)); z.add(flat(L,C.op,0x2f80d0,.08,5,0,D/2+C.op/2)); g.add(z); g.userData.zone=z; }
   } else if(kind==='col'){
@@ -719,6 +815,7 @@ function each(fn){ for(const [k,arr] of KINDS) for(const e of S[arr]) fn(k,e); }
 function findRef(ref){ if(!ref) return null; const arr=(KINDS.find(k=>k[0]===ref.k)||[])[1]; return arr?S[arr].find(e=>e.id===ref.id):null; }
 
 function sync(){
+  invalidate(true);
   const rk=JSON.stringify(S.room)+wallMode+view;
   if(rk!==roomKey){ roomKey=rk; buildRoom(); }
   const seen=new Set();
@@ -822,7 +919,7 @@ function placeLabels(){
 // 选中 / 属性面板
 // ================================================================
 let selRef=null;
-function select(ref){ selRef=ref&&(ref.k==='room'||findRef(ref))?ref:null; applySelection(); renderProps(); if(selRef) showTab('props'); }
+function select(ref){ invalidate(); selRef=ref&&(ref.k==='room'||findRef(ref))?ref:null; applySelection(); renderProps(); if(selRef) showTab('props'); }
 function applySelection(){ for(const [id,o] of objs){ const on=!!selRef&&selRef.id===id; if(o.g.userData.sel) o.g.userData.sel.visible=on;
     if(o.g.userData.zone) o.g.userData.zone.visible=view==='plan'||on||!!status.get(id)||tool==='door'; } showHandles(selRef&&selRef.k==='room'||tool==='wall'&&!draft); }
 function showTab(t){ document.querySelectorAll('.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===t)); document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.dataset.pane===t)); }
@@ -1214,7 +1311,7 @@ function focusOn(ref){ const e=findRef(ref); if(!e) return; let x=e.x,z=e.z; if(
 function updateShadowBox(){ const b=bbox(), R=Math.max(b.w,b.d)/2+6000; // 平面图里太阳放正上方，阴影只落在设备脚下
   if(view==='plan') sun.position.set(b.cx+1,R*2,b.cz+1); else sun.position.set(b.cx-R*.45,R*1.5,b.cz+R*.7); sun.target.position.set(b.cx,0,b.cz);
   Object.assign(sun.shadow.camera,{left:-R,right:R,top:R,bottom:-R,near:100,far:R*5}); sun.shadow.camera.updateProjectionMatrix(); }
-function resize(){ const r=stage.getBoundingClientRect(); renderer.setSize(r.width,r.height,false); persp.aspect=r.width/Math.max(1,r.height); persp.updateProjectionMatrix(); updateOrtho(); }
+function resize(){ invalidate(); const r=stage.getBoundingClientRect(); renderer.setSize(r.width,r.height,false); persp.aspect=r.width/Math.max(1,r.height); persp.updateProjectionMatrix(); updateOrtho(); }
 addEventListener('resize',resize);
 $('bFit').onclick=fitView;
 $('bWall').onclick=()=>{ const ks=Object.keys(WALL_MODES); wallMode=ks[(ks.indexOf(wallMode)+1)%ks.length]; $('bWall').textContent=WALL_MODES[wallMode]; roomKey=''; sync(); };
@@ -1224,7 +1321,7 @@ $('bLbl').onclick=()=>{ showLabels=!showLabels; $('bLbl').setAttribute('aria-pre
 // 顶部按钮：示例 / 清空 / 导出 / 保存 / 打开 / 咨询
 // ================================================================
 const toast=m=>{ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('on'),2600); };
-$('bDemo').onclick=()=>{ S=demoState(); select(null); commit(); fitView(); toast('已载入示例：两组验布单元 + 包装线'); };
+$('bDemo').onclick=()=>{ S=demoState(); select(null); commit(); fitView(); toast('已载入图示产线：4 台验布机 → 热缩 → 横向包装 → 4 组推布落框'); };
 $('bClear').onclick=()=>{ S=emptyState(); select(null); commit(); setTool('wall'); fitView(); toast('已清空（可撤销）。先画厂房轮廓'); };
 function download(name,url){ const a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); }
 const today=()=>new Date().toISOString().slice(0,10);
@@ -1283,20 +1380,45 @@ function renderSum(){
 // ================================================================
 function fitClip(){ if(view!=='3d') return; const d=persp.position.distanceTo(ctlP.target), near=Math.max(100,d/150), far=Math.max(200000,d*20);
   if(Math.abs(near-persp.near)/persp.near>.08||persp.far!==far){ persp.near=near; persp.far=far; persp.updateProjectionMatrix(); } }
-function loop(){ ctl().update(); fitClip(); renderer.render(scene,cam()); placeLabels(); requestAnimationFrame(loop); }
+const lineFlow=createLineFlow({T,scene,getState:()=>S,notify:message=>toast(message),invalidate,el:{play:$('flowPlay'),reset:$('flowReset'),speed:$('flowSpeed'),status:$('flowStatus'),progress:$('flowProgress'),count:$('flowCount')}});
+function loop(now){
+  renderRequest=null;if(document.hidden)return;
+  lineFlow.update(now);const moved=ctl().update();
+  if(dirty||moved||lineFlow.isRunning()){dirty=false;fitClip();renderer.render(scene,cam());placeLabels();}
+  if(moved||lineFlow.isRunning()||dirty)invalidate();
+}
+function applyQuality(){
+  const requested=$('quality').value;
+  const light=matchMedia('(pointer:coarse)').matches||(navigator.deviceMemory&&navigator.deviceMemory<=4)||(navigator.hardwareConcurrency&&navigator.hardwareConcurrency<=4);
+  const level=requested==='auto'?(light?'lite':'standard'):requested;
+  renderer.setPixelRatio(Math.min(devicePixelRatio,level==='lite'?1:level==='high'?2:1.5));
+  renderer.shadowMap.enabled=level!=='lite';
+  const size=level==='high'?2048:1024;sun.shadow.mapSize.set(size,size);
+  if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null;}
+  scene.traverse(o=>{if(o.material)for(const m of (Array.isArray(o.material)?o.material:[o.material]))m.needsUpdate=true;});
+  try{localStorage.setItem('zj-layout-quality',requested);}catch(e){}
+  resize();invalidate(true);
+}
+try{const q=localStorage.getItem('zj-layout-quality');if(['auto','lite','standard','high'].includes(q))$('quality').value=q;}catch(e){}
+$('quality').onchange=applyQuality;
+ctlP.addEventListener('change',()=>invalidate());ctlO.addEventListener('change',()=>invalidate());
+for(const event of ['pointerdown','pointermove','pointerup','wheel','click','input','change'])stage.addEventListener(event,()=>invalidate(),{passive:true});
+document.addEventListener('keydown',()=>invalidate());
+document.addEventListener('click',()=>invalidate());
+document.addEventListener('visibilitychange',()=>{if(document.hidden){if(renderRequest!==null)cancelAnimationFrame(renderRequest);renderRequest=null;}else invalidate(true);});
 const root=document.documentElement;
 try{ const t=localStorage.getItem('zj-theme'); if(t) root.dataset.theme=t; }catch(e){}
 $('themeBtn').onclick=()=>{ const dark=root.dataset.theme?root.dataset.theme==='dark':matchMedia('(prefers-color-scheme:dark)').matches;
   root.dataset.theme=dark?'light':'dark'; try{ localStorage.setItem('zj-theme',root.dataset.theme); }catch(e){} applyTheme(); };
 matchMedia('(prefers-color-scheme:dark)').addEventListener('change',applyTheme);
 
-applyTheme(); resize();
+applyTheme(); applyQuality();
 view=QS.get('view')==='plan'?'plan':'3d';
 setTool(QS.get('tool')||'select');
 commit(); fitView(); setView(view);
 if(QS.get('sel')==='first'&&S.mach[0]) select({k:'m',id:S.mach[0].id});
 if(QS.get('tab')) showTab(QS.get('tab'));
-requestAnimationFrame(loop);
+renderReady=true; invalidate(true);
 
 // 自测：?selftest 时用合成指针事件走一遍主要操作，结果写到 body[data-selftest]
 if(QS.has('selftest')) setTimeout(()=>{
