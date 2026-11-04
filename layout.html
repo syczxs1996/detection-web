@@ -249,51 +249,137 @@ function flat(w,d,color,op,y,cx,cz){ const m=new T.Mesh(new T.PlaneGeometry(w,d)
 // 设备模型（按宣传册外形简化，尺寸为示意）
 // ================================================================
 function buildInspect(o){
+  // 验布机 LB551F：白色主框 + 蓝紫侧板 + 倾斜检测舱 + 辊筒系统 + 前操作台
   const g=new T.Group(), L=o.fw+700, D=1500, W=L-640;
+  const blueSide=std(0x3a4ecc,.2,.5);  // 蓝紫色侧板
+  const glassM=std(0xd0e8f0,.1,.1,{transparent:true,opacity:.22,depthWrite:false,side:T.DoubleSide});
+
+  // 左右蓝色侧板（两片厚板，覆盖全高）
   for(const s of [-1,1]){
     const x=s*(L/2-160);
-    box(300,2050,450,M.blue,x,1025,-D/2+225,g);
-    box(300,820,D-450,M.blue,x,410,-D/2+450+(D-450)/2,g);
-    box(310,320,760,M.white,x,2200,-D/2+380,g);
-    box(310,60,D-440,M.white,x,850,-D/2+450+(D-450)/2,g);
+    box(280,2200,D,blueSide,x,1100,0,g);         // 主侧板
+    box(290,80,D+20,M.white,x,2200,0,g);          // 顶部白边
   }
-  box(W,220,D-300,M.white,0,150,0,g);
-  box(W,480,40,M.white,0,520,D/2-190,g);
-  cyl(70,W,M.steel,'x',0,960,D/2-270,g); cyl(55,W,M.steel,'x',0,640,40,g);
-  cyl(190,o.fw,M.roll2,'x',0,470,-170,g); cyl(45,W,M.steel,'x',0,470,-170,g);
-  const tb=box(W,24,560,M.steel,0,1060,D/2-300,g); tb.rotation.x=.12;
-  const bd=box(W-40,1000,30,M.black,0,1650,-D/2+520,g); bd.rotation.x=-.25;
-  const fb=box(o.fw,4,1310,M.fabric,0,1580,50,g); fb.rotation.x=.912;
-  const hood=box(L-200,140,1300,M.white,0,2300,-60,g); hood.rotation.x=-.18;
-  const lamp=box(W-120,22,80,M.lamp,0,2215,330,g); lamp.rotation.x=-.18;
-  box(260,180,60,M.white,L/2-520,1920,420,g); box(200,120,8,M.dark,L/2-520,1920,454,g);
+  // 底部机台（白色，带脚垫）
+  box(W+40,240,D+40,M.white,0,120,0,g);
+  for(const fx of [-W/2+120,W/2-120]) for(const fz of [-D/2+120,D/2-120])
+    box(100,40,100,M.dark,fx,245,fz,g);
+
+  // 中部传动区白色外壳（两侧）
+  box(W,60,D,M.white,0,460,0,g);
+  box(W,60,D,M.white,0,860,0,g);
+
+  // 主辊筒（布卷放卷辊）
+  cyl(200,o.fw,M.roll2,'x',0,580,-D/2+360,g);
+  cyl(46,W,M.steel,'x',0,580,-D/2+360,g);
+  // 张力辊 + 导布辊
+  cyl(65,W,M.steel,'x',0,980,D/2-280,g);
+  cyl(55,W,M.steel,'x',0,680,80,g);
+  cyl(50,W,M.steel,'x',0,1150,-80,g);
+
+  // 倾斜检测板（光台）
+  const bd=box(W-40,1100,30,M.black,0,1620,-D/2+560,g); bd.rotation.x=-.28;
+  const fb=box(o.fw,4,1350,M.fabric,0,1560,60,g); fb.rotation.x=.85;
+
+  // 顶部倾斜透明检测舱盖
+  const hood=box(L-120,160,1400,glassM,0,2320,-30,g); hood.rotation.x=-.16;
+  const hoodFrame=box(L-120,30,1400,M.white,0,2290,-30,g); hoodFrame.rotation.x=-.16;
+  // 舱内灯管
+  const lamp=box(W-140,18,90,M.lamp,0,2210,360,g); lamp.rotation.x=-.16;
+
+  // 前操作台（配电箱 + 屏幕）
+  box(480,1050,380,blueSide,L/2-520,525,D/2-190,g);  // 配电箱体
+  box(500,60,400,M.white,L/2-520,1055,D/2-190,g);     // 台面
+  box(220,140,10,M.dark,L/2-520,1160,D/2-8,g);        // 操作屏
+  box(60,60,10,M.steel,L/2-600,920,D/2-8,g);          // 急停按钮座
+  cyl(30,20,std(0xcc2020,.1,.5),'z',L/2-600,940,D/2+2,g); // 红色急停
+
+  // 后侧成卷收布辊
+  cyl(220,o.fw,M.roll,'x',0,650,-D/2+200,g);
+  cyl(46,W,M.steel,'x',0,650,-D/2+200,g);
+
   if(o.ai){ // 织鉴视觉检测架：型材龙门 + 线阵相机 + 条形光源
-    for(const s of [-1,1]) box(40,1600,80,M.alu,s*(W/2-30),1900,D/2-40,g);
-    box(W,80,40,M.alu,0,2660,D/2-40,g);
+    for(const s of [-1,1]) box(40,1700,80,M.alu,s*(W/2-30),1950,D/2-40,g);
+    box(W,80,40,M.alu,0,2700,D/2-40,g);
     const n=Math.max(2,Math.ceil(o.fw/410));
-    for(let i=0;i<n;i++){ const x=-o.fw/2+o.fw*(i+.5)/n; box(62,48,62,M.black,x,2580,D/2-40,g); cyl(22,60,M.dark,'y',x,2526,D/2-40,g); }
-    box(W-80,50,70,M.dark,0,2380,D/2-160,g); box(W-120,6,52,M.lamp,0,2352,D/2-160,g);
-    box(300,90,6,M.accent,0,2660,D/2-18,g);
+    for(let i=0;i<n;i++){
+      const x=-o.fw/2+o.fw*(i+.5)/n;
+      box(62,52,62,M.black,x,2620,D/2-40,g);
+      cyl(22,64,M.dark,'y',x,2566,D/2-40,g);
+    }
+    box(W-80,50,70,M.dark,0,2420,D/2-165,g);
+    box(W-120,6,52,M.lamp,0,2392,D/2-165,g);
+    box(300,90,6,M.accent,0,2700,D/2-18,g);
   }
   return g;
 }
 function buildPack(){
-  const g=new T.Group(), hx=450, hz=-350, HW=2500, HD=1500;
-  box(HW,450,HD,M.gray,hx,225,hz,g);
-  box(HW,160,HD,M.white,hx,2100,hz,g);
-  box(HW,1500,50,M.white,hx,1170,hz-HD/2+25,g);
-  for(const s of [-1,1]) box(80,1950,HD,M.white,hx+s*(HW/2-40),1125,hz,g);
-  cyl(40,HW-200,M.steel,'x',hx,1750,hz+350,g); cyl(40,HW-200,M.steel,'x',hx,650,hz+350,g);
-  cyl(170,1900,M.roll,'x',hx,1000,hz+150,g);
-  for(const x of [-500,450,1400]){ cyl(55,650,M.steel,'y',x,2500,hz,g); cyl(72,60,M.dark,'y',x,2850,hz,g); }
-  cyl(260,320,M.gray,'z',1720,1450,500,g); cyl(120,330,M.gray,'z',1720,1450,820,g); cyl(110,700,M.steel,'x',1350,1700,300,g);
-  box(650,950,800,M.cage,1650,475,950,g);
-  box(900,1050,650,M.blue,-1450,525,600,g);
-  const con=box(1000,90,700,M.blue,-1450,1110,620,g); con.rotation.x=.25;
-  const scr=box(300,190,16,M.black,-1450,1180,880,g); scr.rotation.x=-1.32;
-  box(1900,50,650,M.green,300,880,650,g);
-  for(const s of [-1,1]) box(1900,90,30,M.steel,300,910,650+s*330,g);
-  for(const x of [-550,1150]) for(const s of [-1,1]) box(50,860,50,M.gray,x,430,650+s*290,g);
+  // 布匹自动包装机 LB04-180
+  // 整体尺寸 4000×2700×2900，由三部分组成：
+  //   左侧：配电柜（深蓝色独立方柜）
+  //   中央：主机体（白色框架 + 绿色传送台 + 送膜立杆）
+  //   两侧：废料箱（半透明网格柜）
+  const g=new T.Group();
+  const darkBlue=std(0x233570,.15,.5);
+  const cageM=std(0x8a9bb0,.5,.4,{transparent:true,opacity:.38,depthWrite:false});
+
+  // ── 配电柜（左侧，独立）──
+  const CW=900, CH=1800, CD=700;
+  const cx=-1550;
+  box(CW,CH,CD,darkBlue,cx,CH/2,0,g);            // 柜体
+  box(CW+20,30,CD+20,M.alu,cx,CH,0,g);           // 顶盖
+  box(CW+20,30,CD+20,M.dark,cx,20,0,g);          // 底座
+  box(80,CH-100,CD+4,std(0x1a2a5e,.1,.4),cx,CH/2,0,g); // 前门深色面板
+  // 面板上的控制元件
+  box(160,80,8,M.dark,cx-200,CH*0.72,CD/2+2,g);  // 显示屏
+  box(60,60,8,std(0xcc2222,.1,.4),cx+120,CH*0.68,CD/2+2,g); // 急停
+  for(let i=0;i<3;i++) box(40,40,8,std(0x229944,.1,.5),cx-80+i*60,CH*0.6,CD/2+2,g); // 指示灯
+  box(180,30,8,M.steel,cx,CH*0.48,CD/2+2,g);     // 操作按钮条
+
+  // ── 主机体（中央）──
+  const MW=2200, MH=2600, MD=1400, mx=400;
+  // 底部机台
+  box(MW,300,MD,M.gray,mx,150,0,g);
+  box(MW+40,30,MD+40,M.dark,mx,10,0,g);          // 底座压条
+  // 左右立柱（白色）
+  for(const s of [-1,1]){
+    box(80,MH,80,M.white,mx+s*(MW/2-40),MH/2,MD/2-40,g);
+    box(80,MH,80,M.white,mx+s*(MW/2-40),MH/2,-MD/2+40,g);
+  }
+  // 前后横梁
+  box(MW,60,60,M.white,mx,MH-30,MD/2-40,g);
+  box(MW,60,60,M.white,mx,MH-30,-MD/2+40,g);
+  box(MW,60,60,M.white,mx,1200,MD/2-40,g);
+  // 绿色传送平台
+  box(MW-120,50,MD-100,M.green,mx,920,0,g);
+  for(const s of [-1,1]) box(MW-100,80,30,M.steel,mx,960,s*(MD/2-70),g); // 传送带侧边导轨
+  // 压膜横梁 + 热封刀
+  box(MW-60,80,60,M.alu,mx,1600,0,g);
+  box(MW-80,20,50,std(0xcc4400,.1,.5),mx,1640,0,g); // 热封条（橙红色）
+  // 包装膜辊（顶部）
+  cyl(120,MD-100,M.roll,'z',mx,MH-180,0,g);
+  cyl(36,MD-100,M.steel,'z',mx,MH-180,0,g);
+  // 送膜立杆（3根，带顶部导杆）
+  for(const x of [mx-800,mx,mx+800]){
+    cyl(35,800,M.steel,'y',x,MH+400,0,g);
+    cyl(55,50,M.dark,'y',x,MH+800,0,g);
+  }
+  box(MW-100,40,40,M.steel,mx,MH+780,0,g); // 顶部横导杆
+
+  // ── 废料箱（两侧，各一个）──
+  const BW=700, BH=900, BD=700;
+  for(const s of [-1,1]){
+    const bx=mx+s*(MW/2+BW/2+80);
+    box(BW,BH,BD,cageM,bx,BH/2,0,g);            // 半透明网格箱体
+    box(BW+20,30,BD+20,M.steel,bx,BH,0,g);       // 顶框
+    box(BW+20,30,BD+20,M.steel,bx,10,0,g);       // 底框
+    for(const fz of [-1,1]) box(BW,BH,8,cageM,bx,BH/2,fz*(BD/2),g); // 前后网面
+    for(const fx of [-1,1]) box(8,BH,BD,cageM,bx+fx*(BW/2),BH/2,0,g); // 左右网面
+    // 万向轮
+    for(const wx of [-1,1]) for(const wz of [-1,1])
+      cyl(50,60,M.dark,'y',bx+wx*(BW/2-80),60,wz*(BD/2-80),g);
+  }
+
   return g;
 }
 function buildShrink(){
@@ -357,7 +443,7 @@ function buildCart(){
 const CAT={
   inspect:{name:'验布机',size:o=>[o.fw+700,1500,o.ai?2720:2380],op:1000,build:buildInspect,
     opts:[{k:'fw',label:'门幅',type:'sel',vals:[1600,1800,2200,2600],unit:'mm'},{k:'ai',label:'加装织鉴视觉检测架',type:'bool'}]},
-  pack:{name:'布匹自动包装机',size:()=>[4000,2700,2900],op:900,build:buildPack,opts:[]},
+  pack:{name:'布匹自动包装机',size:()=>[5400,2900,1600],op:900,build:buildPack,opts:[]},
   shrink:{name:'热收缩包装机',size:()=>[2400,1000,1600],op:0,build:buildShrink,opts:[]},
   conv:{name:'输送带',size:o=>[o.len,700,o.h+(o.push?260:0)],op:0,build:buildConv,
     opts:[{k:'len',label:'长度',type:'num',min:1000,max:12000,step:100,unit:'mm'},{k:'h',label:'台面高',type:'sel',vals:[800,1200],unit:'mm'},{k:'push',label:'带推布装置',type:'bool'}]},
