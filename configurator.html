@@ -84,8 +84,9 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .toast.on{opacity:1;transform:translateX(-50%)}
 
 @media (max-width:900px){
-  html,body{overflow:auto;height:auto}
-  #stage{height:100svh}
+  html{height:100%}
+  body{height:100%;overflow:hidden}
+  #stage{flex:1;min-height:0;height:auto}
   .card-opt,.pre .card-opt{left:12px;right:12px;width:auto;top:auto;bottom:76px;transform:none;max-height:42%;padding:18px}
   .card-opt h2{font-size:20px}
   .steps{left:12px;right:12px;transform:none;overflow-x:auto;justify-content:flex-start}
